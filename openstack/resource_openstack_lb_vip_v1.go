@@ -22,17 +22,12 @@ func resourceLBVipV1() *schema.Resource {
 			State: schema.ImportStatePassthrough,
 		},
 
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(10 * time.Minute),
-			Delete: schema.DefaultTimeout(10 * time.Minute),
-		},
-
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 			"name": &schema.Schema{
 				Type:     schema.TypeString,
@@ -110,7 +105,7 @@ func resourceLBVipV1() *schema.Resource {
 
 func resourceLBVipV1Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -144,7 +139,7 @@ func resourceLBVipV1Create(d *schema.ResourceData, meta interface{}) error {
 		Pending:    []string{"PENDING_CREATE"},
 		Target:     []string{"ACTIVE"},
 		Refresh:    waitForLBVIPActive(networkingClient, p.ID),
-		Timeout:    d.Timeout(schema.TimeoutCreate),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -166,7 +161,7 @@ func resourceLBVipV1Create(d *schema.ResourceData, meta interface{}) error {
 
 func resourceLBVipV1Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -200,14 +195,12 @@ func resourceLBVipV1Read(d *schema.ResourceData, meta interface{}) error {
 	}
 	d.Set("persistence", persistence)
 
-	d.Set("region", GetRegion(d, config))
-
 	return nil
 }
 
 func resourceLBVipV1Update(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -287,7 +280,7 @@ func resourceLBVipV1Update(d *schema.ResourceData, meta interface{}) error {
 
 func resourceLBVipV1Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -296,7 +289,7 @@ func resourceLBVipV1Delete(d *schema.ResourceData, meta interface{}) error {
 		Pending:    []string{"ACTIVE", "PENDING_DELETE"},
 		Target:     []string{"DELETED"},
 		Refresh:    waitForLBVIPDelete(networkingClient, d.Id()),
-		Timeout:    d.Timeout(schema.TimeoutDelete),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}

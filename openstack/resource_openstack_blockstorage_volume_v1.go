@@ -24,19 +24,13 @@ func resourceBlockStorageVolumeV1() *schema.Resource {
 			State: schema.ImportStatePassthrough,
 		},
 
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(10 * time.Minute),
-			Delete: schema.DefaultTimeout(10 * time.Minute),
-		},
-
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
-
 			"size": &schema.Schema{
 				Type:     schema.TypeInt,
 				Required: true,
@@ -112,21 +106,21 @@ func resourceBlockStorageVolumeV1() *schema.Resource {
 
 func resourceBlockStorageVolumeV1Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	blockStorageClient, err := config.blockStorageV1Client(GetRegion(d, config))
+	blockStorageClient, err := config.blockStorageV1Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack block storage client: %s", err)
 	}
 
 	createOpts := &volumes.CreateOpts{
-		Description:      d.Get("description").(string),
-		AvailabilityZone: d.Get("availability_zone").(string),
-		Name:             d.Get("name").(string),
-		Size:             d.Get("size").(int),
-		SnapshotID:       d.Get("snapshot_id").(string),
-		SourceVolID:      d.Get("source_vol_id").(string),
-		ImageID:          d.Get("image_id").(string),
-		VolumeType:       d.Get("volume_type").(string),
-		Metadata:         resourceContainerMetadataV2(d),
+		Description:  d.Get("description").(string),
+		Availability: d.Get("availability_zone").(string),
+		Name:         d.Get("name").(string),
+		Size:         d.Get("size").(int),
+		SnapshotID:   d.Get("snapshot_id").(string),
+		SourceVolID:  d.Get("source_vol_id").(string),
+		ImageID:      d.Get("image_id").(string),
+		VolumeType:   d.Get("volume_type").(string),
+		Metadata:     resourceContainerMetadataV2(d),
 	}
 
 	log.Printf("[DEBUG] Create Options: %#v", createOpts)
@@ -135,6 +129,9 @@ func resourceBlockStorageVolumeV1Create(d *schema.ResourceData, meta interface{}
 		return fmt.Errorf("Error creating OpenStack volume: %s", err)
 	}
 	log.Printf("[INFO] Volume ID: %s", v.ID)
+
+	// Store the ID now
+	d.SetId(v.ID)
 
 	// Wait for the volume to become available.
 	log.Printf(
@@ -145,7 +142,7 @@ func resourceBlockStorageVolumeV1Create(d *schema.ResourceData, meta interface{}
 		Pending:    []string{"downloading", "creating"},
 		Target:     []string{"available"},
 		Refresh:    VolumeV1StateRefreshFunc(blockStorageClient, v.ID),
-		Timeout:    d.Timeout(schema.TimeoutCreate),
+		Timeout:    10 * time.Minute,
 		Delay:      10 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -157,16 +154,12 @@ func resourceBlockStorageVolumeV1Create(d *schema.ResourceData, meta interface{}
 			v.ID, err)
 	}
 
-	// Store the ID now
-	d.SetId(v.ID)
-
 	return resourceBlockStorageVolumeV1Read(d, meta)
 }
 
 func resourceBlockStorageVolumeV1Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-
-	blockStorageClient, err := config.blockStorageV1Client(GetRegion(d, config))
+	blockStorageClient, err := config.blockStorageV1Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack block storage client: %s", err)
 	}
@@ -186,7 +179,6 @@ func resourceBlockStorageVolumeV1Read(d *schema.ResourceData, meta interface{}) 
 	d.Set("source_vol_id", v.SourceVolID)
 	d.Set("volume_type", v.VolumeType)
 	d.Set("metadata", v.Metadata)
-	d.Set("region", GetRegion(d, config))
 
 	attachments := make([]map[string]interface{}, len(v.Attachments))
 	for i, attachment := range v.Attachments {
@@ -203,7 +195,7 @@ func resourceBlockStorageVolumeV1Read(d *schema.ResourceData, meta interface{}) 
 
 func resourceBlockStorageVolumeV1Update(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	blockStorageClient, err := config.blockStorageV1Client(GetRegion(d, config))
+	blockStorageClient, err := config.blockStorageV1Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack block storage client: %s", err)
 	}
@@ -227,7 +219,7 @@ func resourceBlockStorageVolumeV1Update(d *schema.ResourceData, meta interface{}
 
 func resourceBlockStorageVolumeV1Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	blockStorageClient, err := config.blockStorageV1Client(GetRegion(d, config))
+	blockStorageClient, err := config.blockStorageV1Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack block storage client: %s", err)
 	}
@@ -240,7 +232,7 @@ func resourceBlockStorageVolumeV1Delete(d *schema.ResourceData, meta interface{}
 	// make sure this volume is detached from all instances before deleting
 	if len(v.Attachments) > 0 {
 		log.Printf("[DEBUG] detaching volumes")
-		if computeClient, err := config.computeV2Client(GetRegion(d, config)); err != nil {
+		if computeClient, err := config.computeV2Client(d.Get("region").(string)); err != nil {
 			return err
 		} else {
 			for _, volumeAttachment := range v.Attachments {
@@ -284,7 +276,7 @@ func resourceBlockStorageVolumeV1Delete(d *schema.ResourceData, meta interface{}
 		Pending:    []string{"deleting", "downloading", "available"},
 		Target:     []string{"deleted"},
 		Refresh:    VolumeV1StateRefreshFunc(blockStorageClient, d.Id()),
-		Timeout:    d.Timeout(schema.TimeoutDelete),
+		Timeout:    10 * time.Minute,
 		Delay:      10 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -318,12 +310,6 @@ func VolumeV1StateRefreshFunc(client *gophercloud.ServiceClient, volumeID string
 				return v, "deleted", nil
 			}
 			return nil, "", err
-		}
-
-		if v.Status == "error" {
-			return v, v.Status, fmt.Errorf("There was an error creating the volume. " +
-				"Please check with your cloud admin or check the Block Storage " +
-				"API logs to see why this error occurred.")
 		}
 
 		return v, v.Status, nil

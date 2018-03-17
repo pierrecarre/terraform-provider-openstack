@@ -4,15 +4,11 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"log"
+	"io/ioutil"
 	"net/http"
-	"os"
 
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack"
-	"github.com/gophercloud/gophercloud/openstack/objectstorage/v1/swauth"
-	"github.com/hashicorp/terraform/helper/pathorcontents"
-	"github.com/hashicorp/terraform/terraform"
 )
 
 type Config struct {
@@ -25,18 +21,16 @@ type Config struct {
 	IdentityEndpoint string
 	Insecure         bool
 	Password         string
-	Region           string
-	Swauth           bool
 	TenantID         string
 	TenantName       string
 	Token            string
 	Username         string
 	UserID           string
 
-	OsClient *gophercloud.ProviderClient
+	osClient *gophercloud.ProviderClient
 }
 
-func (c *Config) LoadAndValidate() error {
+func (c *Config) loadAndValidate() error {
 	validEndpoint := false
 	validEndpoints := []string{
 		"internal", "internalURL",
@@ -72,18 +66,15 @@ func (c *Config) LoadAndValidate() error {
 		return err
 	}
 
-	// Set UserAgent
-	client.UserAgent.Prepend(terraform.UserAgentString())
-
 	config := &tls.Config{}
 	if c.CACertFile != "" {
-		caCert, _, err := pathorcontents.Read(c.CACertFile)
+		caCert, err := ioutil.ReadFile(c.CACertFile)
 		if err != nil {
-			return fmt.Errorf("Error reading CA Cert: %s", err)
+			return err
 		}
 
 		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM([]byte(caCert))
+		caCertPool.AppendCertsFromPEM(caCert)
 		config.RootCAs = caCertPool
 	}
 
@@ -92,16 +83,7 @@ func (c *Config) LoadAndValidate() error {
 	}
 
 	if c.ClientCertFile != "" && c.ClientKeyFile != "" {
-		clientCert, _, err := pathorcontents.Read(c.ClientCertFile)
-		if err != nil {
-			return fmt.Errorf("Error reading Client Cert: %s", err)
-		}
-		clientKey, _, err := pathorcontents.Read(c.ClientKeyFile)
-		if err != nil {
-			return fmt.Errorf("Error reading Client Key: %s", err)
-		}
-
-		cert, err := tls.X509KeyPair([]byte(clientCert), []byte(clientKey))
+		cert, err := tls.LoadX509KeyPair(c.ClientCertFile, c.ClientKeyFile)
 		if err != nil {
 			return err
 		}
@@ -110,97 +92,50 @@ func (c *Config) LoadAndValidate() error {
 		config.BuildNameToCertificate()
 	}
 
-	// if OS_DEBUG is set, log the requests and responses
-	var osDebug bool
-	if os.Getenv("OS_DEBUG") != "" {
-		osDebug = true
-	}
-
 	transport := &http.Transport{Proxy: http.ProxyFromEnvironment, TLSClientConfig: config}
-	client.HTTPClient = http.Client{
-		Transport: &LogRoundTripper{
-			Rt:      transport,
-			OsDebug: osDebug,
-		},
+	client.HTTPClient.Transport = transport
+
+	err = openstack.Authenticate(client, ao)
+	if err != nil {
+		return err
 	}
 
-	// If using Swift Authentication, there's no need to validate authentication normally.
-	if !c.Swauth {
-		err = openstack.Authenticate(client, ao)
-		if err != nil {
-			return err
-		}
-	}
-
-	c.OsClient = client
+	c.osClient = client
 
 	return nil
 }
 
-func (c *Config) determineRegion(region string) string {
-	// If a resource-level region was not specified, and a provider-level region was set,
-	// use the provider-level region.
-	if region == "" && c.Region != "" {
-		region = c.Region
-	}
-
-	log.Printf("[DEBUG] OpenStack Region is: %s", region)
-	return region
-}
-
 func (c *Config) blockStorageV1Client(region string) (*gophercloud.ServiceClient, error) {
-	return openstack.NewBlockStorageV1(c.OsClient, gophercloud.EndpointOpts{
-		Region:       c.determineRegion(region),
+	return openstack.NewBlockStorageV1(c.osClient, gophercloud.EndpointOpts{
+		Region:       region,
 		Availability: c.getEndpointType(),
 	})
 }
 
 func (c *Config) blockStorageV2Client(region string) (*gophercloud.ServiceClient, error) {
-	return openstack.NewBlockStorageV2(c.OsClient, gophercloud.EndpointOpts{
-		Region:       c.determineRegion(region),
+	return openstack.NewBlockStorageV2(c.osClient, gophercloud.EndpointOpts{
+		Region:       region,
 		Availability: c.getEndpointType(),
 	})
 }
 
 func (c *Config) computeV2Client(region string) (*gophercloud.ServiceClient, error) {
-	return openstack.NewComputeV2(c.OsClient, gophercloud.EndpointOpts{
-		Region:       c.determineRegion(region),
-		Availability: c.getEndpointType(),
-	})
-}
-
-func (c *Config) dnsV2Client(region string) (*gophercloud.ServiceClient, error) {
-	return openstack.NewDNSV2(c.OsClient, gophercloud.EndpointOpts{
-		Region:       c.determineRegion(region),
-		Availability: c.getEndpointType(),
-	})
-}
-
-func (c *Config) imageV2Client(region string) (*gophercloud.ServiceClient, error) {
-	return openstack.NewImageServiceV2(c.OsClient, gophercloud.EndpointOpts{
-		Region:       c.determineRegion(region),
+	return openstack.NewComputeV2(c.osClient, gophercloud.EndpointOpts{
+		Region:       region,
 		Availability: c.getEndpointType(),
 	})
 }
 
 func (c *Config) networkingV2Client(region string) (*gophercloud.ServiceClient, error) {
-	return openstack.NewNetworkV2(c.OsClient, gophercloud.EndpointOpts{
-		Region:       c.determineRegion(region),
+	return openstack.NewNetworkV2(c.osClient, gophercloud.EndpointOpts{
+		Region:       region,
 		Availability: c.getEndpointType(),
 	})
 }
 
 func (c *Config) objectStorageV1Client(region string) (*gophercloud.ServiceClient, error) {
-	// If Swift Authentication is being used, return a swauth client.
-	if c.Swauth {
-		return swauth.NewObjectStorageV1(c.OsClient, swauth.AuthOpts{
-			User: c.Username,
-			Key:  c.Password,
-		})
-	}
-
-	return openstack.NewObjectStorageV1(c.OsClient, gophercloud.EndpointOpts{
-		Region:       c.determineRegion(region),
+	return openstack.NewObjectStorageV1(c.osClient, gophercloud.EndpointOpts{
+		Region:       region,
 		Availability: c.getEndpointType(),
 	})
 }

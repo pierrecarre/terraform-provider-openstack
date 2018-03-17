@@ -6,7 +6,7 @@ import (
 	"github.com/hashicorp/terraform/helper/resource"
 )
 
-func TestAccLBV1VIP_importBasic(t *testing.T) {
+func TestAccOpenStackLBVIPV1_importBasic(t *testing.T) {
 	resourceName := "openstack_lb_vip_v1.vip_1"
 
 	resource.Test(t, resource.TestCase{
@@ -19,9 +19,10 @@ func TestAccLBV1VIP_importBasic(t *testing.T) {
 			},
 
 			resource.TestStep{
-				ResourceName:      resourceName,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"region"},
 			},
 		},
 	})

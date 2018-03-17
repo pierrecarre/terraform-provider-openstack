@@ -19,17 +19,12 @@ func resourceNetworkingRouterInterfaceV2() *schema.Resource {
 		Read:   resourceNetworkingRouterInterfaceV2Read,
 		Delete: resourceNetworkingRouterInterfaceV2Delete,
 
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(10 * time.Minute),
-			Delete: schema.DefaultTimeout(10 * time.Minute),
-		},
-
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 			"router_id": &schema.Schema{
 				Type:     schema.TypeString,
@@ -52,7 +47,7 @@ func resourceNetworkingRouterInterfaceV2() *schema.Resource {
 
 func resourceNetworkingRouterInterfaceV2Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -75,7 +70,7 @@ func resourceNetworkingRouterInterfaceV2Create(d *schema.ResourceData, meta inte
 		Pending:    []string{"BUILD", "PENDING_CREATE", "PENDING_UPDATE"},
 		Target:     []string{"ACTIVE"},
 		Refresh:    waitForRouterInterfaceActive(networkingClient, n.PortID),
-		Timeout:    d.Timeout(schema.TimeoutCreate),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -89,7 +84,7 @@ func resourceNetworkingRouterInterfaceV2Create(d *schema.ResourceData, meta inte
 
 func resourceNetworkingRouterInterfaceV2Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -106,14 +101,12 @@ func resourceNetworkingRouterInterfaceV2Read(d *schema.ResourceData, meta interf
 
 	log.Printf("[DEBUG] Retrieved Router Interface %s: %+v", d.Id(), n)
 
-	d.Set("region", GetRegion(d, config))
-
 	return nil
 }
 
 func resourceNetworkingRouterInterfaceV2Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -122,7 +115,7 @@ func resourceNetworkingRouterInterfaceV2Delete(d *schema.ResourceData, meta inte
 		Pending:    []string{"ACTIVE"},
 		Target:     []string{"DELETED"},
 		Refresh:    waitForRouterInterfaceDelete(networkingClient, d),
-		Timeout:    d.Timeout(schema.TimeoutDelete),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}

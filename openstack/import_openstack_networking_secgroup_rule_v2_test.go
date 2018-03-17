@@ -6,8 +6,8 @@ import (
 	"github.com/hashicorp/terraform/helper/resource"
 )
 
-func TestAccNetworkingV2SecGroupRule_importBasic(t *testing.T) {
-	resourceName := "openstack_networking_secgroup_rule_v2.secgroup_rule_1"
+func TestAccOpenStackNetworkingSecGroupRuleV2_importBasic(t *testing.T) {
+	resourceName := "openstack_networking_secgroup_rule_v2.sr_foo"
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
@@ -19,9 +19,10 @@ func TestAccNetworkingV2SecGroupRule_importBasic(t *testing.T) {
 			},
 
 			resource.TestStep{
-				ResourceName:      resourceName,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"region"},
 			},
 		},
 	})

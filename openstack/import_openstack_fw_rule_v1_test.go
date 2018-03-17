@@ -6,8 +6,8 @@ import (
 	"github.com/hashicorp/terraform/helper/resource"
 )
 
-func TestAccFWRuleV1_importBasic(t *testing.T) {
-	resourceName := "openstack_fw_rule_v1.rule_1"
+func TestAccOpenStackFWRuleV1_importBasic(t *testing.T) {
+	resourceName := "openstack_fw_rule_v1.accept_test"
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
@@ -15,13 +15,14 @@ func TestAccFWRuleV1_importBasic(t *testing.T) {
 		CheckDestroy: testAccCheckFWRuleV1Destroy,
 		Steps: []resource.TestStep{
 			resource.TestStep{
-				Config: testAccFWRuleV1_basic_2,
+				Config: testFirewallRuleConfig,
 			},
 
 			resource.TestStep{
-				ResourceName:      resourceName,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"region"},
 			},
 		},
 	})

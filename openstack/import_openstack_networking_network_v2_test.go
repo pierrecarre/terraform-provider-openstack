@@ -6,8 +6,8 @@ import (
 	"github.com/hashicorp/terraform/helper/resource"
 )
 
-func TestAccNetworkingV2Network_importBasic(t *testing.T) {
-	resourceName := "openstack_networking_network_v2.network_1"
+func TestAccOpenStackNetworkingNetworkV2_importBasic(t *testing.T) {
+	resourceName := "openstack_networking_network_v2.foo"
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
@@ -19,9 +19,10 @@ func TestAccNetworkingV2Network_importBasic(t *testing.T) {
 			},
 
 			resource.TestStep{
-				ResourceName:      resourceName,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            resourceName,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"region"},
 			},
 		},
 	})

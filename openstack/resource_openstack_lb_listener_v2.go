@@ -10,7 +10,6 @@ import (
 
 	"github.com/gophercloud/gophercloud"
 	"github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/lbaas_v2/listeners"
-	"github.com/gophercloud/gophercloud/openstack/networking/v2/extensions/lbaas_v2/loadbalancers"
 )
 
 func resourceListenerV2() *schema.Resource {
@@ -20,16 +19,12 @@ func resourceListenerV2() *schema.Resource {
 		Update: resourceListenerV2Update,
 		Delete: resourceListenerV2Delete,
 
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(30 * time.Minute),
-		},
-
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 
 			"protocol": &schema.Schema{
@@ -116,7 +111,7 @@ func resourceListenerV2() *schema.Resource {
 
 func resourceListenerV2Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -144,36 +139,10 @@ func resourceListenerV2Create(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	log.Printf("[DEBUG] Create Options: %#v", createOpts)
-
-	var listener *listeners.Listener
-	err = resource.Retry(d.Timeout(schema.TimeoutCreate), func() *resource.RetryError {
-		var err error
-		lbID := createOpts.LoadbalancerID
-		if lbID != "" {
-			lb, err := loadbalancers.Get(networkingClient, lbID).Extract()
-			if err != nil {
-				fmt.Printf("[DEBUG] Error attempting to get loadbalancer before creating listener: %s. Continuing...", err)
-			} else {
-				if lb.ProvisioningStatus != "ACTIVE" {
-					err := waitForLoadBalancerActive(d, networkingClient, lbID)
-					if err != nil {
-						fmt.Printf("[DEBUG] Error waiting for loadbalancer before creating listener: %s. Continuing...", err)
-					}
-				}
-			}
-		}
-		log.Printf("[DEBUG] Attempting to create LBaaSV2 listener")
-		listener, err = listeners.Create(networkingClient, createOpts).Extract()
-		if err != nil {
-			return checkForRetryableError(err)
-		}
-		return nil
-	})
-
+	listener, err := listeners.Create(networkingClient, createOpts).Extract()
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack LBaaSV2 listener: %s", err)
 	}
-
 	log.Printf("[INFO] Listener ID: %s", listener.ID)
 
 	log.Printf("[DEBUG] Waiting for Openstack LBaaSV2 listener (%s) to become available.", listener.ID)
@@ -181,7 +150,7 @@ func resourceListenerV2Create(d *schema.ResourceData, meta interface{}) error {
 	stateConf := &resource.StateChangeConf{
 		Pending:    []string{"PENDING_CREATE"},
 		Target:     []string{"ACTIVE"},
-		Refresh:    checkForListenerActive(networkingClient, listener.ID),
+		Refresh:    waitForListenerActive(networkingClient, listener.ID),
 		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
@@ -199,7 +168,7 @@ func resourceListenerV2Create(d *schema.ResourceData, meta interface{}) error {
 
 func resourceListenerV2Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -222,14 +191,13 @@ func resourceListenerV2Read(d *schema.ResourceData, meta interface{}) error {
 	d.Set("connection_limit", listener.ConnLimit)
 	d.Set("sni_container_refs", listener.SniContainerRefs)
 	d.Set("default_tls_container_ref", listener.DefaultTlsContainerRef)
-	d.Set("region", GetRegion(d, config))
 
 	return nil
 }
 
 func resourceListenerV2Update(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -275,7 +243,7 @@ func resourceListenerV2Update(d *schema.ResourceData, meta interface{}) error {
 
 func resourceListenerV2Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -283,7 +251,7 @@ func resourceListenerV2Delete(d *schema.ResourceData, meta interface{}) error {
 	stateConf := &resource.StateChangeConf{
 		Pending:    []string{"ACTIVE", "PENDING_DELETE"},
 		Target:     []string{"DELETED"},
-		Refresh:    checkForListenerDelete(networkingClient, d.Id()),
+		Refresh:    waitForListenerDelete(networkingClient, d.Id()),
 		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
@@ -298,7 +266,7 @@ func resourceListenerV2Delete(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func checkForListenerActive(networkingClient *gophercloud.ServiceClient, listenerID string) resource.StateRefreshFunc {
+func waitForListenerActive(networkingClient *gophercloud.ServiceClient, listenerID string) resource.StateRefreshFunc {
 	return func() (interface{}, string, error) {
 		listener, err := listeners.Get(networkingClient, listenerID).Extract()
 		if err != nil {
@@ -311,7 +279,7 @@ func checkForListenerActive(networkingClient *gophercloud.ServiceClient, listene
 	}
 }
 
-func checkForListenerDelete(networkingClient *gophercloud.ServiceClient, listenerID string) resource.StateRefreshFunc {
+func waitForListenerDelete(networkingClient *gophercloud.ServiceClient, listenerID string) resource.StateRefreshFunc {
 	return func() (interface{}, string, error) {
 		log.Printf("[DEBUG] Attempting to delete OpenStack LBaaSV2 listener %s", listenerID)
 

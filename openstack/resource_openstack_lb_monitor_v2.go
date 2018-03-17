@@ -19,17 +19,12 @@ func resourceMonitorV2() *schema.Resource {
 		Update: resourceMonitorV2Update,
 		Delete: resourceMonitorV2Delete,
 
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(10 * time.Minute),
-			Delete: schema.DefaultTimeout(10 * time.Minute),
-		},
-
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 
 			"pool_id": &schema.Schema{
@@ -99,7 +94,7 @@ func resourceMonitorV2() *schema.Resource {
 
 func resourceMonitorV2Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -131,8 +126,8 @@ func resourceMonitorV2Create(d *schema.ResourceData, meta interface{}) error {
 	stateConf := &resource.StateChangeConf{
 		Pending:    []string{"PENDING_CREATE"},
 		Target:     []string{"ACTIVE"},
-		Refresh:    checkForMonitorActive(networkingClient, monitor.ID),
-		Timeout:    d.Timeout(schema.TimeoutCreate),
+		Refresh:    waitForMonitorActive(networkingClient, monitor.ID),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -149,7 +144,7 @@ func resourceMonitorV2Create(d *schema.ResourceData, meta interface{}) error {
 
 func resourceMonitorV2Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -172,14 +167,13 @@ func resourceMonitorV2Read(d *schema.ResourceData, meta interface{}) error {
 	d.Set("expected_codes", monitor.ExpectedCodes)
 	d.Set("admin_state_up", monitor.AdminStateUp)
 	d.Set("name", monitor.Name)
-	d.Set("region", GetRegion(d, config))
 
 	return nil
 }
 
 func resourceMonitorV2Update(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -223,7 +217,7 @@ func resourceMonitorV2Update(d *schema.ResourceData, meta interface{}) error {
 
 func resourceMonitorV2Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -231,8 +225,8 @@ func resourceMonitorV2Delete(d *schema.ResourceData, meta interface{}) error {
 	stateConf := &resource.StateChangeConf{
 		Pending:    []string{"ACTIVE", "PENDING_DELETE"},
 		Target:     []string{"DELETED"},
-		Refresh:    checkForMonitorDelete(networkingClient, d.Id()),
-		Timeout:    d.Timeout(schema.TimeoutDelete),
+		Refresh:    waitForMonitorDelete(networkingClient, d.Id()),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -246,7 +240,7 @@ func resourceMonitorV2Delete(d *schema.ResourceData, meta interface{}) error {
 	return nil
 }
 
-func checkForMonitorActive(networkingClient *gophercloud.ServiceClient, monitorID string) resource.StateRefreshFunc {
+func waitForMonitorActive(networkingClient *gophercloud.ServiceClient, monitorID string) resource.StateRefreshFunc {
 	return func() (interface{}, string, error) {
 		monitor, err := monitors.Get(networkingClient, monitorID).Extract()
 		if err != nil {
@@ -258,7 +252,7 @@ func checkForMonitorActive(networkingClient *gophercloud.ServiceClient, monitorI
 	}
 }
 
-func checkForMonitorDelete(networkingClient *gophercloud.ServiceClient, monitorID string) resource.StateRefreshFunc {
+func waitForMonitorDelete(networkingClient *gophercloud.ServiceClient, monitorID string) resource.StateRefreshFunc {
 	return func() (interface{}, string, error) {
 		log.Printf("[DEBUG] Attempting to delete OpenStack LBaaSV2 Monitor %s", monitorID)
 

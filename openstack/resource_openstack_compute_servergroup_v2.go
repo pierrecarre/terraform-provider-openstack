@@ -20,12 +20,11 @@ func resourceComputeServerGroupV2() *schema.Resource {
 
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
-
 			"name": &schema.Schema{
 				Type:     schema.TypeString,
 				ForceNew: true,
@@ -42,30 +41,21 @@ func resourceComputeServerGroupV2() *schema.Resource {
 				Computed: true,
 				Elem:     &schema.Schema{Type: schema.TypeString},
 			},
-			"value_specs": &schema.Schema{
-				Type:     schema.TypeMap,
-				Optional: true,
-				ForceNew: true,
-			},
 		},
 	}
 }
 
 func resourceComputeServerGroupV2Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}
 
-	createOpts := ServerGroupCreateOpts{
-		servergroups.CreateOpts{
-			Name:     d.Get("name").(string),
-			Policies: resourceServerGroupPoliciesV2(d),
-		},
-		MapValueSpecs(d),
+	createOpts := &servergroups.CreateOpts{
+		Name:     d.Get("name").(string),
+		Policies: resourceServerGroupPoliciesV2(d),
 	}
-
 	log.Printf("[DEBUG] Create Options: %#v", createOpts)
 	newSG, err := servergroups.Create(computeClient, createOpts).Extract()
 	if err != nil {
@@ -79,7 +69,7 @@ func resourceComputeServerGroupV2Create(d *schema.ResourceData, meta interface{}
 
 func resourceComputeServerGroupV2Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}
@@ -108,14 +98,12 @@ func resourceComputeServerGroupV2Read(d *schema.ResourceData, meta interface{}) 
 	}
 	d.Set("members", members)
 
-	d.Set("region", GetRegion(d, config))
-
 	return nil
 }
 
 func resourceComputeServerGroupV2Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}

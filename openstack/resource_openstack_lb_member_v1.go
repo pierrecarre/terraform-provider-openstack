@@ -22,17 +22,12 @@ func resourceLBMemberV1() *schema.Resource {
 			State: schema.ImportStatePassthrough,
 		},
 
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(10 * time.Minute),
-			Delete: schema.DefaultTimeout(10 * time.Minute),
-		},
-
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 			"tenant_id": &schema.Schema{
 				Type:     schema.TypeString,
@@ -71,7 +66,7 @@ func resourceLBMemberV1() *schema.Resource {
 
 func resourceLBMemberV1Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -94,9 +89,9 @@ func resourceLBMemberV1Create(d *schema.ResourceData, meta interface{}) error {
 
 	stateConf := &resource.StateChangeConf{
 		Pending:    []string{"PENDING_CREATE"},
-		Target:     []string{"ACTIVE", "INACTIVE", "CREATED", "DOWN"},
+		Target:     []string{"ACTIVE", "INACTIVE"},
 		Refresh:    waitForLBMemberActive(networkingClient, m.ID),
-		Timeout:    d.Timeout(schema.TimeoutCreate),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -125,7 +120,7 @@ func resourceLBMemberV1Create(d *schema.ResourceData, meta interface{}) error {
 
 func resourceLBMemberV1Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -142,14 +137,13 @@ func resourceLBMemberV1Read(d *schema.ResourceData, meta interface{}) error {
 	d.Set("port", m.ProtocolPort)
 	d.Set("weight", m.Weight)
 	d.Set("admin_state_up", m.AdminStateUp)
-	d.Set("region", GetRegion(d, config))
 
 	return nil
 }
 
 func resourceLBMemberV1Update(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -172,7 +166,7 @@ func resourceLBMemberV1Update(d *schema.ResourceData, meta interface{}) error {
 
 func resourceLBMemberV1Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -186,7 +180,7 @@ func resourceLBMemberV1Delete(d *schema.ResourceData, meta interface{}) error {
 		Pending:    []string{"ACTIVE", "PENDING_DELETE"},
 		Target:     []string{"DELETED"},
 		Refresh:    waitForLBMemberDelete(networkingClient, d.Id()),
-		Timeout:    d.Timeout(schema.TimeoutDelete),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}

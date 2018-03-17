@@ -22,17 +22,12 @@ func resourceNetworkingSubnetV2() *schema.Resource {
 			State: schema.ImportStatePassthrough,
 		},
 
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(10 * time.Minute),
-			Delete: schema.DefaultTimeout(10 * time.Minute),
-		},
-
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 			"network_id": &schema.Schema{
 				Type:     schema.TypeString,
@@ -58,7 +53,7 @@ func resourceNetworkingSubnetV2() *schema.Resource {
 			"allocation_pools": &schema.Schema{
 				Type:     schema.TypeList,
 				Optional: true,
-				Computed: true,
+				ForceNew: true,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
 						"start": &schema.Schema{
@@ -130,7 +125,7 @@ func resourceNetworkingSubnetV2() *schema.Resource {
 
 func resourceNetworkingSubnetV2Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -182,7 +177,7 @@ func resourceNetworkingSubnetV2Create(d *schema.ResourceData, meta interface{}) 
 	stateConf := &resource.StateChangeConf{
 		Target:     []string{"ACTIVE"},
 		Refresh:    waitForSubnetActive(networkingClient, s.ID),
-		Timeout:    d.Timeout(schema.TimeoutCreate),
+		Timeout:    10 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -197,7 +192,7 @@ func resourceNetworkingSubnetV2Create(d *schema.ResourceData, meta interface{}) 
 
 func resourceNetworkingSubnetV2Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -214,31 +209,19 @@ func resourceNetworkingSubnetV2Read(d *schema.ResourceData, meta interface{}) er
 	d.Set("ip_version", s.IPVersion)
 	d.Set("name", s.Name)
 	d.Set("tenant_id", s.TenantID)
+	d.Set("allocation_pools", s.AllocationPools)
 	d.Set("gateway_ip", s.GatewayIP)
 	d.Set("dns_nameservers", s.DNSNameservers)
 	d.Set("host_routes", s.HostRoutes)
 	d.Set("enable_dhcp", s.EnableDHCP)
 	d.Set("network_id", s.NetworkID)
 
-	// Set the allocation_pools
-	var allocationPools []map[string]interface{}
-	for _, v := range s.AllocationPools {
-		pool := make(map[string]interface{})
-		pool["start"] = v.Start
-		pool["end"] = v.End
-
-		allocationPools = append(allocationPools, pool)
-	}
-	d.Set("allocation_pools", allocationPools)
-
-	d.Set("region", GetRegion(d, config))
-
 	return nil
 }
 
 func resourceNetworkingSubnetV2Update(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -292,10 +275,6 @@ func resourceNetworkingSubnetV2Update(d *schema.ResourceData, meta interface{}) 
 		updateOpts.EnableDHCP = &v
 	}
 
-	if d.HasChange("allocation_pools") {
-		updateOpts.AllocationPools = resourceSubnetAllocationPoolsV2(d)
-	}
-
 	log.Printf("[DEBUG] Updating Subnet %s with options: %+v", d.Id(), updateOpts)
 
 	_, err = subnets.Update(networkingClient, d.Id(), updateOpts).Extract()
@@ -308,7 +287,7 @@ func resourceNetworkingSubnetV2Update(d *schema.ResourceData, meta interface{}) 
 
 func resourceNetworkingSubnetV2Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack networking client: %s", err)
 	}
@@ -317,7 +296,7 @@ func resourceNetworkingSubnetV2Delete(d *schema.ResourceData, meta interface{}) 
 		Pending:    []string{"ACTIVE"},
 		Target:     []string{"DELETED"},
 		Refresh:    waitForSubnetDelete(networkingClient, d.Id()),
-		Timeout:    d.Timeout(schema.TimeoutDelete),
+		Timeout:    10 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}

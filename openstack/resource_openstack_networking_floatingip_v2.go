@@ -24,17 +24,12 @@ func resourceNetworkingFloatingIPV2() *schema.Resource {
 			State: schema.ImportStatePassthrough,
 		},
 
-		Timeouts: &schema.ResourceTimeout{
-			Create: schema.DefaultTimeout(10 * time.Minute),
-			Delete: schema.DefaultTimeout(10 * time.Minute),
-		},
-
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
 			"address": &schema.Schema{
 				Type:     schema.TypeString,
@@ -73,7 +68,7 @@ func resourceNetworkingFloatingIPV2() *schema.Resource {
 
 func resourceNetworkFloatingIPV2Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack network client: %s", err)
 	}
@@ -106,7 +101,7 @@ func resourceNetworkFloatingIPV2Create(d *schema.ResourceData, meta interface{})
 	stateConf := &resource.StateChangeConf{
 		Target:     []string{"ACTIVE"},
 		Refresh:    waitForFloatingIPActive(networkingClient, floatingIP.ID),
-		Timeout:    d.Timeout(schema.TimeoutCreate),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -120,7 +115,7 @@ func resourceNetworkFloatingIPV2Create(d *schema.ResourceData, meta interface{})
 
 func resourceNetworkFloatingIPV2Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack network client: %s", err)
 	}
@@ -140,14 +135,12 @@ func resourceNetworkFloatingIPV2Read(d *schema.ResourceData, meta interface{}) e
 	d.Set("pool", poolName)
 	d.Set("tenant_id", floatingIP.TenantID)
 
-	d.Set("region", GetRegion(d, config))
-
 	return nil
 }
 
 func resourceNetworkFloatingIPV2Update(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack network client: %s", err)
 	}
@@ -171,7 +164,7 @@ func resourceNetworkFloatingIPV2Update(d *schema.ResourceData, meta interface{})
 
 func resourceNetworkFloatingIPV2Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack network client: %s", err)
 	}
@@ -180,7 +173,7 @@ func resourceNetworkFloatingIPV2Delete(d *schema.ResourceData, meta interface{})
 		Pending:    []string{"ACTIVE"},
 		Target:     []string{"DELETED"},
 		Refresh:    waitForFloatingIPDelete(networkingClient, d.Id()),
-		Timeout:    d.Timeout(schema.TimeoutDelete),
+		Timeout:    2 * time.Minute,
 		Delay:      5 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
@@ -196,7 +189,7 @@ func resourceNetworkFloatingIPV2Delete(d *schema.ResourceData, meta interface{})
 
 func getNetworkID(d *schema.ResourceData, meta interface{}, networkName string) (string, error) {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return "", fmt.Errorf("Error creating OpenStack network client: %s", err)
 	}
@@ -226,7 +219,7 @@ func getNetworkID(d *schema.ResourceData, meta interface{}, networkName string) 
 
 func getNetworkName(d *schema.ResourceData, meta interface{}, networkID string) (string, error) {
 	config := meta.(*Config)
-	networkingClient, err := config.networkingV2Client(GetRegion(d, config))
+	networkingClient, err := config.networkingV2Client(d.Get("region").(string))
 	if err != nil {
 		return "", fmt.Errorf("Error creating OpenStack network client: %s", err)
 	}

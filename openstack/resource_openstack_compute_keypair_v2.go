@@ -19,12 +19,11 @@ func resourceComputeKeypairV2() *schema.Resource {
 
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
-
 			"name": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,
@@ -46,7 +45,7 @@ func resourceComputeKeypairV2() *schema.Resource {
 
 func resourceComputeKeypairV2Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}
@@ -72,7 +71,7 @@ func resourceComputeKeypairV2Create(d *schema.ResourceData, meta interface{}) er
 
 func resourceComputeKeypairV2Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}
@@ -84,14 +83,13 @@ func resourceComputeKeypairV2Read(d *schema.ResourceData, meta interface{}) erro
 
 	d.Set("name", kp.Name)
 	d.Set("public_key", kp.PublicKey)
-	d.Set("region", GetRegion(d, config))
 
 	return nil
 }
 
 func resourceComputeKeypairV2Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}

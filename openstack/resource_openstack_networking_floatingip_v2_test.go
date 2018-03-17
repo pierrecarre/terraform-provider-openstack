@@ -2,6 +2,7 @@ package openstack
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform/helper/resource"
@@ -12,7 +13,7 @@ import (
 )
 
 func TestAccNetworkingV2FloatingIP_basic(t *testing.T) {
-	var fip floatingips.FloatingIP
+	var floatingIP floatingips.FloatingIP
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
@@ -22,7 +23,42 @@ func TestAccNetworkingV2FloatingIP_basic(t *testing.T) {
 			resource.TestStep{
 				Config: testAccNetworkingV2FloatingIP_basic,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckNetworkingV2FloatingIPExists("openstack_networking_floatingip_v2.fip_1", &fip),
+					testAccCheckNetworkingV2FloatingIPExists(t, "openstack_networking_floatingip_v2.foo", &floatingIP),
+				),
+			},
+		},
+	})
+}
+
+func TestAccNetworkingV2FloatingIP_attach(t *testing.T) {
+	var instance servers.Server
+	var fip floatingips.FloatingIP
+	var testAccNetworkV2FloatingIP_attach = fmt.Sprintf(`
+    resource "openstack_networking_floatingip_v2" "myip" {
+    }
+
+    resource "openstack_compute_instance_v2" "foo" {
+      name = "terraform-test"
+      security_groups = ["default"]
+      floating_ip = "${openstack_networking_floatingip_v2.myip.address}"
+
+      network {
+        uuid = "%s"
+      }
+    }`,
+		os.Getenv("OS_NETWORK_ID"))
+
+	resource.Test(t, resource.TestCase{
+		PreCheck:     func() { testAccPreCheck(t) },
+		Providers:    testAccProviders,
+		CheckDestroy: testAccCheckNetworkingV2FloatingIPDestroy,
+		Steps: []resource.TestStep{
+			resource.TestStep{
+				Config: testAccNetworkV2FloatingIP_attach,
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckNetworkingV2FloatingIPExists(t, "openstack_networking_floatingip_v2.myip", &fip),
+					testAccCheckComputeV2InstanceExists(t, "openstack_compute_instance_v2.foo", &instance),
+					testAccCheckNetworkingV2InstanceFloatingIPAttach(&instance, &fip),
 				),
 			},
 		},
@@ -31,6 +67,48 @@ func TestAccNetworkingV2FloatingIP_basic(t *testing.T) {
 
 func TestAccNetworkingV2FloatingIP_fixedip_bind(t *testing.T) {
 	var fip floatingips.FloatingIP
+	var testAccNetworkingV2FloatingIP_fixedip_bind = fmt.Sprintf(`
+		resource "openstack_networking_network_v2" "network_1" {
+			name = "network_1"
+			admin_state_up = "true"
+		}
+
+		resource "openstack_networking_subnet_v2" "subnet_1" {
+			name = "subnet_1"
+			network_id = "${openstack_networking_network_v2.network_1.id}"
+			cidr = "192.168.199.0/24"
+			ip_version = 4
+		}
+
+		resource "openstack_networking_router_interface_v2" "router_interface_1" {
+			router_id = "${openstack_networking_router_v2.router_1.id}"
+			subnet_id = "${openstack_networking_subnet_v2.subnet_1.id}"
+		}
+
+		resource "openstack_networking_router_v2" "router_1" {
+			name = "router_1"
+			external_gateway = "%s"
+		}
+
+		resource "openstack_networking_port_v2" "port_1" {
+			network_id = "${openstack_networking_subnet_v2.subnet_1.network_id}"
+			admin_state_up = "true"
+			fixed_ip {
+				subnet_id = "${openstack_networking_subnet_v2.subnet_1.id}"
+				ip_address = "192.168.199.10"
+			}
+			fixed_ip {
+				subnet_id = "${openstack_networking_subnet_v2.subnet_1.id}"
+				ip_address = "192.168.199.20"
+			}
+		}
+
+		resource "openstack_networking_floatingip_v2" "ip_1" {
+			pool = "%s"
+			port_id = "${openstack_networking_port_v2.port_1.id}"
+			fixed_ip = "${openstack_networking_port_v2.port_1.fixed_ip.1.ip_address}"
+		}`,
+		os.Getenv("OS_EXTGW_ID"), os.Getenv("OS_POOL_NAME"))
 
 	resource.Test(t, resource.TestCase{
 		PreCheck:     func() { testAccPreCheck(t) },
@@ -40,26 +118,8 @@ func TestAccNetworkingV2FloatingIP_fixedip_bind(t *testing.T) {
 			resource.TestStep{
 				Config: testAccNetworkingV2FloatingIP_fixedip_bind,
 				Check: resource.ComposeTestCheckFunc(
-					testAccCheckNetworkingV2FloatingIPExists("openstack_networking_floatingip_v2.fip_1", &fip),
-					testAccCheckNetworkingV2FloatingIPBoundToCorrectIP(&fip, "192.168.199.20"),
-				),
-			},
-		},
-	})
-}
-
-func TestAccNetworkingV2FloatingIP_timeout(t *testing.T) {
-	var fip floatingips.FloatingIP
-
-	resource.Test(t, resource.TestCase{
-		PreCheck:     func() { testAccPreCheck(t) },
-		Providers:    testAccProviders,
-		CheckDestroy: testAccCheckNetworkingV2FloatingIPDestroy,
-		Steps: []resource.TestStep{
-			resource.TestStep{
-				Config: testAccNetworkingV2FloatingIP_timeout,
-				Check: resource.ComposeTestCheckFunc(
-					testAccCheckNetworkingV2FloatingIPExists("openstack_networking_floatingip_v2.fip_1", &fip),
+					testAccCheckNetworkingV2FloatingIPExists(t, "openstack_networking_floatingip_v2.ip_1", &fip),
+					testAccCheckNetworkingV2FloatingIPBoundToCorrectIP(t, &fip, "192.168.199.20"),
 				),
 			},
 		},
@@ -70,7 +130,7 @@ func testAccCheckNetworkingV2FloatingIPDestroy(s *terraform.State) error {
 	config := testAccProvider.Meta().(*Config)
 	networkClient, err := config.networkingV2Client(OS_REGION_NAME)
 	if err != nil {
-		return fmt.Errorf("Error creating OpenStack floating IP: %s", err)
+		return fmt.Errorf("(testAccCheckNetworkingV2FloatingIPDestroy) Error creating OpenStack floating IP: %s", err)
 	}
 
 	for _, rs := range s.RootModule().Resources {
@@ -87,7 +147,7 @@ func testAccCheckNetworkingV2FloatingIPDestroy(s *terraform.State) error {
 	return nil
 }
 
-func testAccCheckNetworkingV2FloatingIPExists(n string, kp *floatingips.FloatingIP) resource.TestCheckFunc {
+func testAccCheckNetworkingV2FloatingIPExists(t *testing.T, n string, kp *floatingips.FloatingIP) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		rs, ok := s.RootModule().Resources[n]
 		if !ok {
@@ -101,7 +161,7 @@ func testAccCheckNetworkingV2FloatingIPExists(n string, kp *floatingips.Floating
 		config := testAccProvider.Meta().(*Config)
 		networkClient, err := config.networkingV2Client(OS_REGION_NAME)
 		if err != nil {
-			return fmt.Errorf("Error creating OpenStack networking client: %s", err)
+			return fmt.Errorf("(testAccCheckNetworkingV2FloatingIPExists) Error creating OpenStack networking client: %s", err)
 		}
 
 		found, err := floatingips.Get(networkClient, rs.Primary.ID).Extract()
@@ -119,7 +179,7 @@ func testAccCheckNetworkingV2FloatingIPExists(n string, kp *floatingips.Floating
 	}
 }
 
-func testAccCheckNetworkingV2FloatingIPBoundToCorrectIP(fip *floatingips.FloatingIP, fixed_ip string) resource.TestCheckFunc {
+func testAccCheckNetworkingV2FloatingIPBoundToCorrectIP(t *testing.T, fip *floatingips.FloatingIP, fixed_ip string) resource.TestCheckFunc {
 	return func(s *terraform.State) error {
 		if fip.FixedIP != fixed_ip {
 			return fmt.Errorf("Floating ip associated with wrong fixed ip")
@@ -151,61 +211,6 @@ func testAccCheckNetworkingV2InstanceFloatingIPAttach(
 	}
 }
 
-const testAccNetworkingV2FloatingIP_basic = `
-resource "openstack_networking_floatingip_v2" "fip_1" {
-}
-`
-
-var testAccNetworkingV2FloatingIP_fixedip_bind = fmt.Sprintf(`
-resource "openstack_networking_network_v2" "network_1" {
-  name = "network_1"
-  admin_state_up = "true"
-}
-
-resource "openstack_networking_subnet_v2" "subnet_1" {
-  name = "subnet_1"
-  cidr = "192.168.199.0/24"
-  ip_version = 4
-  network_id = "${openstack_networking_network_v2.network_1.id}"
-}
-
-resource "openstack_networking_router_interface_v2" "router_interface_1" {
-  router_id = "${openstack_networking_router_v2.router_1.id}"
-  subnet_id = "${openstack_networking_subnet_v2.subnet_1.id}"
-}
-
-resource "openstack_networking_router_v2" "router_1" {
-  name = "router_1"
-  external_gateway = "%s"
-}
-
-resource "openstack_networking_port_v2" "port_1" {
-  admin_state_up = "true"
-  network_id = "${openstack_networking_subnet_v2.subnet_1.network_id}"
-
-  fixed_ip {
-    subnet_id = "${openstack_networking_subnet_v2.subnet_1.id}"
-    ip_address = "192.168.199.10"
-  }
-
-  fixed_ip {
-    subnet_id = "${openstack_networking_subnet_v2.subnet_1.id}"
-    ip_address = "192.168.199.20"
-  }
-}
-
-resource "openstack_networking_floatingip_v2" "fip_1" {
-  pool = "%s"
-  port_id = "${openstack_networking_port_v2.port_1.id}"
-  fixed_ip = "${openstack_networking_port_v2.port_1.fixed_ip.1.ip_address}"
-}
-`, OS_EXTGW_ID, OS_POOL_NAME)
-
-const testAccNetworkingV2FloatingIP_timeout = `
-resource "openstack_networking_floatingip_v2" "fip_1" {
-  timeouts {
-    create = "5m"
-    delete = "5m"
-  }
-}
-`
+var testAccNetworkingV2FloatingIP_basic = `
+  resource "openstack_networking_floatingip_v2" "foo" {
+  }`

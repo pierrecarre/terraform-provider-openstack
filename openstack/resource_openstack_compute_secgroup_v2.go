@@ -24,18 +24,13 @@ func resourceComputeSecGroupV2() *schema.Resource {
 			State: schema.ImportStatePassthrough,
 		},
 
-		Timeouts: &schema.ResourceTimeout{
-			Delete: schema.DefaultTimeout(10 * time.Minute),
-		},
-
 		Schema: map[string]*schema.Schema{
 			"region": &schema.Schema{
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
-				ForceNew: true,
+				Type:        schema.TypeString,
+				Required:    true,
+				ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("OS_REGION_NAME", ""),
 			},
-
 			"name": &schema.Schema{
 				Type:     schema.TypeString,
 				Required: true,
@@ -100,7 +95,7 @@ func resourceComputeSecGroupV2() *schema.Resource {
 
 func resourceComputeSecGroupV2Create(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}
@@ -138,7 +133,7 @@ func resourceComputeSecGroupV2Create(d *schema.ResourceData, meta interface{}) e
 
 func resourceComputeSecGroupV2Read(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}
@@ -158,14 +153,12 @@ func resourceComputeSecGroupV2Read(d *schema.ResourceData, meta interface{}) err
 	log.Printf("[DEBUG] rulesToMap(sg.Rules): %+v", rtm)
 	d.Set("rule", rtm)
 
-	d.Set("region", GetRegion(d, config))
-
 	return nil
 }
 
 func resourceComputeSecGroupV2Update(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}
@@ -220,7 +213,7 @@ func resourceComputeSecGroupV2Update(d *schema.ResourceData, meta interface{}) e
 
 func resourceComputeSecGroupV2Delete(d *schema.ResourceData, meta interface{}) error {
 	config := meta.(*Config)
-	computeClient, err := config.computeV2Client(GetRegion(d, config))
+	computeClient, err := config.computeV2Client(d.Get("region").(string))
 	if err != nil {
 		return fmt.Errorf("Error creating OpenStack compute client: %s", err)
 	}
@@ -229,7 +222,7 @@ func resourceComputeSecGroupV2Delete(d *schema.ResourceData, meta interface{}) e
 		Pending:    []string{"ACTIVE"},
 		Target:     []string{"DELETED"},
 		Refresh:    SecGroupV2StateRefreshFunc(computeClient, d),
-		Timeout:    d.Timeout(schema.TimeoutDelete),
+		Timeout:    10 * time.Minute,
 		Delay:      10 * time.Second,
 		MinTimeout: 3 * time.Second,
 	}
